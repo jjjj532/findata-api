@@ -1,11 +1,13 @@
 import express, { Request, Response } from 'express';
 import { Quote, OrderBook, OHLCV, ApiResponse } from '../types';
-import { generateQuotes, generateOrderBook, generateHistoricalData, searchSymbols } from '../services/mockData';
-import { getCachedQuotes, setCachedQuotes, getCachedOrderBook, setCachedOrderBook, getCachedHistory, setCachedHistory, getRateLimit, updateRateLimit } from '../services/cache';
+import { generateQuotes, generateOrderBook, generateHistoricalData, searchSymbols as mockSearchSymbols } from '../services/mockData';
+import { getQuotes, getQuote, getHistoricalData, searchSymbols } from '../services/yahooFinance';
+import { getRateLimit, updateRateLimit } from '../services/cache';
 
 const router = express.Router();
 
 const RATE_LIMIT = 100;
+const USE_REAL_DATA = process.env.USE_REAL_DATA === 'true';
 
 router.use(async (req: Request, res: Response, next) => {
   const apiKey = req.headers['x-api-key'] || 'default';
@@ -15,7 +17,7 @@ router.use(async (req: Request, res: Response, next) => {
   const rateLimitInfo = await getRateLimit(key);
   const allowed = await updateRateLimit(key, RATE_LIMIT);
   
-  res.setHeader('X-RateLimit-Limit', RATE_LIMIT);
+  res.setHeader('X-RateLimit-Limit', RATE_LIMIT.toString());
   res.setHeader('X-RateLimit-Remaining', rateLimitInfo.remaining.toString());
   res.setHeader('X-RateLimit-Reset', rateLimitInfo.resetTime.toString());
   
@@ -32,20 +34,14 @@ router.use(async (req: Request, res: Response, next) => {
 router.get('/quotes', async (req: Request, res: Response) => {
   try {
     const { symbols, market, assetClass } = req.query;
+    const symbolList = symbols ? (symbols as string).split(',') : undefined;
     
     let quotes: Quote[];
-    const cached = await getCachedQuotes();
     
-    if (cached) {
-      quotes = cached;
+    if (USE_REAL_DATA) {
+      quotes = await getQuotes(symbolList);
     } else {
       quotes = generateQuotes();
-      await setCachedQuotes(quotes);
-    }
-    
-    if (symbols) {
-      const symbolList = (symbols as string).split(',');
-      quotes = quotes.filter(q => symbolList.includes(q.symbol));
     }
     
     if (market) {
@@ -63,6 +59,7 @@ router.get('/quotes', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
+    console.error('Error fetching quotes:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -74,13 +71,14 @@ router.get('/quotes/:symbol', async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
     
-    let quotes = await getCachedQuotes();
-    if (!quotes) {
-      quotes = generateQuotes();
-      await setCachedQuotes(quotes);
-    }
+    let quote: Quote | null;
     
-    const quote = quotes.find(q => q.symbol === symbol);
+    if (USE_REAL_DATA) {
+      quote = await getQuote(symbol);
+    } else {
+      const quotes = generateQuotes();
+      quote = quotes.find(q => q.symbol === symbol) || null;
+    }
     
     if (!quote) {
       return res.status(404).json({
@@ -96,6 +94,7 @@ router.get('/quotes/:symbol', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
+    console.error('Error fetching quote:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -108,12 +107,7 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
     const { symbol } = req.params;
     const levels = parseInt(req.query.levels as string) || 10;
     
-    let orderBook = await getCachedOrderBook(symbol);
-    
-    if (!orderBook) {
-      orderBook = generateOrderBook(symbol);
-      await setCachedOrderBook(symbol, orderBook);
-    }
+    const orderBook = generateOrderBook(symbol);
     
     const response: ApiResponse<OrderBook> = {
       success: true,
@@ -126,6 +120,7 @@ router.get('/orderbook/:symbol', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
+    console.error('Error fetching orderbook:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -139,11 +134,12 @@ router.get('/history/:symbol', async (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
     const interval = req.query.interval as string || '1d';
     
-    let history = await getCachedHistory(symbol);
+    let data: OHLCV[];
     
-    if (!history) {
-      history = generateHistoricalData(symbol, days);
-      await setCachedHistory(symbol, history);
+    if (USE_REAL_DATA) {
+      data = await getHistoricalData(symbol, days);
+    } else {
+      data = generateHistoricalData(symbol, days);
     }
     
     const response: ApiResponse<{ symbol: string; interval: string; data: OHLCV[] }> = {
@@ -151,12 +147,13 @@ router.get('/history/:symbol', async (req: Request, res: Response) => {
       data: {
         symbol,
         interval,
-        data: history,
+        data,
       },
     };
     
     res.json(response);
   } catch (error) {
+    console.error('Error fetching history:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -175,7 +172,12 @@ router.get('/search', async (req: Request, res: Response) => {
       });
     }
     
-    const results = searchSymbols(query as string);
+    let results;
+    if (USE_REAL_DATA) {
+      results = await searchSymbols(query as string);
+    } else {
+      results = mockSearchSymbols(query as string);
+    }
     
     const response: ApiResponse<{ symbol: string; name: string; market: string; assetClass: string }[]> = {
       success: true,
@@ -184,6 +186,7 @@ router.get('/search', async (req: Request, res: Response) => {
     
     res.json(response);
   } catch (error) {
+    console.error('Error searching symbols:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

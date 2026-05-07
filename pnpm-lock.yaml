@@ -50,6 +50,9 @@ importers:
       tailwind-merge:
         specifier: ^3.0.2
         version: 3.5.0
+      yfinance:
+        specifier: ^0.0.6
+        version: 0.0.6
       zustand:
         specifier: ^5.0.3
         version: 5.0.13(@types/react@18.3.28)(immer@11.1.7)(react@18.3.1)(use-sync-external-store@1.6.0(react@18.3.1))
@@ -2822,6 +2825,9 @@ packages:
     resolution: {integrity: sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w==}
     engines: {node: '>=12'}
 
+  yfinance@0.0.6:
+    resolution: {integrity: sha512-EcJrrcX+ZCpbhouGO6s5y7XRUHGBwFY19PKtUJ17vg1L0dSK2N59Ns0A/ZfLtpWC8WatWjen6gE+KW51bxthsA==}
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -5416,6 +5422,8 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+
+  yfinance@0.0.6: {}
 
   yocto-queue@0.1.0: {}
 
