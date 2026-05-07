@@ -5,7 +5,9 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import app from './app.js';
 import { initCache } from './services/cache.js';
-import { generateQuotes, generateOrderBook } from './services/mockData.js';
+import { generateQuotes } from './services/mockData.js';
+import { getDepthOrderBook } from './services/orderbook.js';
+import { collectAllMarketData } from './sources/fullDataCollector.js';
 
 const PORT = process.env.PORT || 3001;
 
@@ -18,26 +20,57 @@ const io = new Server(httpServer, {
 });
 
 const connectedClients = new Map<string, Set<string>>();
+const clientSubscriptions = new Map<string, string[]>();
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
   connectedClients.set(socket.id, new Set());
+  clientSubscriptions.set(socket.id, []);
 
   socket.on('subscribe', async (symbol: string) => {
     const subscriptions = connectedClients.get(socket.id);
-    if (subscriptions) {
+    const clientSubs = clientSubscriptions.get(socket.id);
+    if (subscriptions && clientSubs) {
       subscriptions.add(symbol);
+      if (!clientSubs.includes(symbol)) {
+        clientSubs.push(symbol);
+      }
       socket.join(`symbol:${symbol}`);
       
-      const orderBook = generateOrderBook(symbol);
-      socket.emit('orderbook_update', orderBook);
+      try {
+        const orderBook = await getDepthOrderBook(symbol, 10);
+        if (orderBook) {
+          socket.emit('orderbook_update', orderBook);
+        }
+      } catch (error) {
+        console.error(`Error fetching order book for ${symbol}:`, error);
+      }
+    }
+  });
+
+  socket.on('subscribe_batch', async (symbols: string[]) => {
+    const subscriptions = connectedClients.get(socket.id);
+    const clientSubs = clientSubscriptions.get(socket.id);
+    if (subscriptions && clientSubs) {
+      for (const symbol of symbols) {
+        subscriptions.add(symbol);
+        if (!clientSubs.includes(symbol)) {
+          clientSubs.push(symbol);
+        }
+        socket.join(`symbol:${symbol}`);
+      }
     }
   });
 
   socket.on('unsubscribe', (symbol: string) => {
     const subscriptions = connectedClients.get(socket.id);
-    if (subscriptions) {
+    const clientSubs = clientSubscriptions.get(socket.id);
+    if (subscriptions && clientSubs) {
       subscriptions.delete(symbol);
+      const index = clientSubs.indexOf(symbol);
+      if (index > -1) {
+        clientSubs.splice(index, 1);
+      }
       socket.leave(`symbol:${symbol}`);
     }
   });
@@ -45,19 +78,35 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     connectedClients.delete(socket.id);
+    clientSubscriptions.delete(socket.id);
   });
 });
 
 async function broadcastQuotes() {
-  const quotes = generateQuotes();
-  io.emit('quotes_update', quotes);
+  try {
+    const quotes = generateQuotes();
+    io.emit('quotes_update', quotes);
+  } catch (error) {
+    console.error('Error broadcasting quotes:', error);
+  }
 }
 
 async function broadcastOrderBooks() {
+  const symbolsUpdated = new Set<string>();
+  
   for (const [clientId, symbols] of connectedClients) {
     for (const symbol of symbols) {
-      const orderBook = generateOrderBook(symbol);
-      io.to(`symbol:${symbol}`).emit('orderbook_update', orderBook);
+      if (!symbolsUpdated.has(symbol)) {
+        symbolsUpdated.add(symbol);
+        try {
+          const orderBook = await getDepthOrderBook(symbol, 10);
+          if (orderBook) {
+            io.to(`symbol:${symbol}`).emit('orderbook_update', orderBook);
+          }
+        } catch (error) {
+          console.error(`Error broadcasting order book for ${symbol}:`, error);
+        }
+      }
     }
   }
 }
@@ -70,13 +119,15 @@ async function startServer() {
     console.log('Redis not available, running without cache');
   }
 
+  collectAllMarketData();
+
   httpServer.listen(PORT, () => {
     console.log(`Server ready on port ${PORT}`);
     console.log(`WebSocket available on ws://localhost:${PORT}`);
   });
 
-  setInterval(broadcastQuotes, 2000);
-  setInterval(broadcastOrderBooks, 1000);
+  setInterval(broadcastQuotes, 5000);
+  setInterval(broadcastOrderBooks, 3000);
 }
 
 startServer();
