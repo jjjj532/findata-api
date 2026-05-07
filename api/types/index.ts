@@ -1,5 +1,6 @@
 export interface Quote {
   symbol: string;
+  name?: string;
   market: string;
   assetClass: string;
   price: number;
@@ -54,6 +55,11 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   message?: string;
+  meta?: {
+    total?: number;
+    lastUpdate?: number;
+    sources?: string[];
+  };
 }
 
 export interface RateLimitInfo {
